@@ -1,3 +1,27 @@
+import numpy as np
+import random
+import copy
+from typing import List, Tuple, Optional, Dict, Any
+
+class EnvConfig:
+    MAX_HP = 40
+    ATK = 6
+    RADIUS = 30.0
+    MAX_VELOCITY = 800.0
+    MU = 0.1 #  currently using friction, mu not used
+    # init position 没想好怎么办
+
+    ARENA_SIZE = (900, 500)
+    FPS = 60
+
+    WIN_SCORE = 4
+    # 还有一堆渲染设置就不写了
+
+class TrainConfig:
+    INITIAL_LR = 1e-4
+
+'''
+这玩意怎么写
 # action = {
 #     'team': 'blue',
 #     'idx': seal_idx,
@@ -9,11 +33,9 @@
 #     'red': [s.state() for s in self.red],
 #     'round_first': self.round_first,
 #     'current_round': self.current_round,
-
-            # 'current_move_team': self.current_move_team,
+#     'current_move_team': self.current_move_team,
 #     'kills_by_blue': self.kills_by_blue,
 #     'kills_by_red': self.kills_by_red,
-#     # action mask: shape (2, 3) booleans. True means allowed to act when that team is acting.
 #     'action_mask': {
 #         'blue': [s.movable for s in self.blue],
 #         'red': [s.movable for s in self.red],
@@ -32,3 +54,4 @@
 #             'radius': self.radius,
 #             'movable': self.movable,
 #         }
+'''

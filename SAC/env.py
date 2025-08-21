@@ -1,15 +1,13 @@
-"""
-这个是目前最好用的
-
-创死时候，尸体会继续完成碰撞，都停下来再重生
-
-"""
-
 import math
 import random
 import copy
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
+from config import EnvConfig
+
+"""
+创死时候，尸体会继续完成碰撞，都停下来再重生
+"""
 
 class Seal:
     def __init__(self, team: str, idx: int, pos: Tuple[float,float], attack: float, max_hp: float, radius: float=30.0):
@@ -39,27 +37,26 @@ class Seal:
         }
 
 class SealBattleEnv:
-    metadata = {'render_modes': ['human', 'rgb_array'], "render_fps": 60}
+    metadata = {'render_modes': ['human', 'rgb_array'], "render_fps": EnvConfig.FPS}
 
     def __init__(self,
-                 arena_size=(900, 500),
+                 config = EnvConfig,
                  seed: Optional[int]=None,
-                 friction_per_second: float = 200.0,  # linear speed reduction per second
-                 physics_dt: float = 1/60.0, # 要和 metadata.render_fps 匹配
-                 max_shot_speed: float = 800.0,
                  seals_per_team: int = 3,
                  render_mode: Optional[str] = None):
         
-        self.arena_size = arena_size
-        self.width, self.height = arena_size
+        self.cfg = config
+        self.arena_size = self.cfg.ARENA_SIZE
+        self.width, self.height = self.arena_size
         self.rng = random.Random(seed)
-        self.friction_per_second = friction_per_second
-        self.dt = physics_dt
-        self.max_shot_speed = max_shot_speed
+        self.friction_per_second = 200.0 # 先这么着，以后用cfg.MU换掉摩擦逻辑
+        self.dt = 1 / self.cfg.FPS
+        self.max_shot_speed = self.cfg.MAX_VELOCITY
         self.seals_per_team = seals_per_team
         self.render_mode = render_mode # -------
 
         # configured initial positions (centered on each half)
+        # 这个以后也塞进config
         self._blue_init_positions = [(100, self.height*(i+1)/(self.seals_per_team+1)) for i in range(self.seals_per_team)]
         self._red_init_positions = [(self.width-100, self.height*(i+1)/(self.seals_per_team+1)) for i in range(self.seals_per_team)]
         self.blue: List[Seal] = []
@@ -70,7 +67,7 @@ class SealBattleEnv:
         self.current_round = 0
         self.kills_by_blue = 0  # counts red respawns
         self.kills_by_red = 0
-        self.max_enemy_respawns_to_win = 3 #--------------------------------------
+        self.max_enemy_respawns_to_win = self.cfg.WIN_SCORE
 
         self._build_seals()
 
@@ -78,12 +75,10 @@ class SealBattleEnv:
         self._last_frames = []
 
     def _build_seals(self):
-        fixed_hp = 40.0
-        fixed_atk = 15.0
-        self.blue = [Seal('blue', i, self._blue_init_positions[i], attack=fixed_atk, max_hp=fixed_hp) for i in range(self.seals_per_team)]
-        self.red  = [Seal('red', i, self._red_init_positions[i], attack=fixed_atk, max_hp=fixed_hp) for i in range(self.seals_per_team)]
+        self.blue = [Seal('blue', i, self._blue_init_positions[i], attack=self.cfg.ATK, max_hp=self.cfg.MAX_HP) for i in range(self.seals_per_team)]
+        self.red  = [Seal('red', i, self._red_init_positions[i], attack=self.cfg.ATK, max_hp=self.cfg.MAX_HP) for i in range(self.seals_per_team)]
 
-    def seed(self, s:int): # api for gym 
+    def seed(self, s:int): # api for gym
         self.rng.seed(s)
 
     def reset(self) -> Dict[str,Any]: # api for gym
@@ -116,7 +111,6 @@ class SealBattleEnv:
             'current_move_team': self.current_move_team,
             'kills_by_blue': self.kills_by_blue,
             'kills_by_red': self.kills_by_red,
-            # action mask: shape (2, 3) booleans. True means allowed to act when that team is acting.
             'action_mask': {
                 'blue': [s.movable for s in self.blue],
                 'red': [s.movable for s in self.red],
@@ -193,7 +187,6 @@ class SealBattleEnv:
                 min_dist = a.radius + b.radius
                 if dist < min_dist - 1e-6:
                     self._seal_collision(a, b)  # elastic collision logic
-
                     damaged_pairs.append((a, b))  # 记录已损伤的海豹对
 
         return damaged_pairs  # 返回所有造成伤害的海豹对
@@ -289,8 +282,7 @@ class SealBattleEnv:
         assert acting_list[action['idx']].movable, f"Seal {action['idx']} of team {action['team']} is not allowed to act this round"
 
         frames_all = []
-
-        print(f'{self.current_round} round, {self.current_move_team} team acting')
+        # print(f'{self.current_round} round, {self.current_move_team} team acting')
 
         # simulate action, get frames
         frames = self.generate_action_frames(action['team'], action['idx'], action['param'])
@@ -308,23 +300,19 @@ class SealBattleEnv:
             self.current_round += 1
             self.round_first = 'red' if self.round_first=='blue' else 'blue'
             self.current_move_team = self.round_first  # reset current move team to the new round's first team
-            for s in (self.blue + self.red):    
-                s.movable = True  # reset movable flag for next 
-                
-        print(f'next move: {self.current_move_team}')
+            for s in (self.blue + self.red):
+                s.movable = True  # reset movable flag for next round
+        # print(f'next move: {self.current_move_team}')
 
         # store last frames
         self._last_frames = frames_all
 
+        observation = self._get_obs()
+        reward = self._get_reward() # tbd -------------------------------------------------
         info = {
             'kills_by_blue': self.kills_by_blue,
             'kills_by_red': self.kills_by_red,
         }
-
-        observation = self._get_obs()
-
-        reward = self._get_reward() # tbd -------------------------------------------------
-
         terminated = (self.kills_by_blue >= self.max_enemy_respawns_to_win) or (self.kills_by_red >= self.max_enemy_respawns_to_win)
         truncated = False  # 没有时间限制导致的结束
         if self.render_mode == 'human':
@@ -367,8 +355,6 @@ class SealBattleRenderer:
         kills_text = self.font.render(f"Blue Kills: {obs['kills_by_blue']} | Red Kills: {obs['kills_by_red']}", 
                                     True, (255, 255, 255))
         self.screen.blit(kills_text, (10, 5))
-        
-        # 绘制回合信息
         turn_text = self.font.render(f"Current Turn: {obs['current_move_team']}, Current Round: {obs['current_round']}", True, (255, 255, 255))
         self.screen.blit(turn_text, (300, 5))
         
@@ -377,9 +363,7 @@ class SealBattleRenderer:
             r = int(s['radius'])
             color = (50,120,255) if s['alive'] else (120,120,120)
             pygame.draw.circle(self.screen, color, (x,y), r)
-            # outline swim ring
             pygame.draw.circle(self.screen, (0,0,0), (x,y), r, 2)
-
             hp_text = self.font.render(f"{int(s['hp'])}+{s['movable']}", True, (255,255,255)) 
             text_width, text_height = self.font.size(f"{int(s['hp'])}+{s['movable']}") 
             self.screen.blit(hp_text, (x - text_width // 2, y - text_height // 2)) 
@@ -405,21 +389,17 @@ class SealBattleRenderer:
             seal_pos = self.selected_seal['pos']
             seal_screen_pos = (seal_pos[0], seal_pos[1] + self.status_bar_height)
             mouse_pos = self.drag_current_pos
-            
             # 绘制从海豹到鼠标的线
             pygame.draw.line(self.screen, (255, 255, 0), seal_screen_pos, mouse_pos, 2)
-            
             # 计算距离（速度指示）
             dx = mouse_pos[0] - seal_screen_pos[0]
             dy = mouse_pos[1] - seal_screen_pos[1]
             distance = math.sqrt(dx*dx + dy*dy)
             max_indicator_radius = 100  # 最大指示器半径
             normalized_speed = min(1.0, distance / max_indicator_radius)
-            
             # 绘制速度指示器（圆形）
             indicator_radius = int(normalized_speed * max_indicator_radius)
             pygame.draw.circle(self.screen, (255, 255, 0), seal_screen_pos, indicator_radius, 2)
-            
             # 显示速度百分比
             speed_text = self.font.render(f"{int(normalized_speed * 100)}%", True, (255, 255, 0))
             self.screen.blit(speed_text, (seal_screen_pos[0] + indicator_radius + 5, seal_screen_pos[1]))
@@ -438,7 +418,7 @@ class SealBattleRenderer:
                 break
             self.render_snapshot(snapshot, obs)
             self.clock.tick(fps)
-        pygame.time.wait(500)
+        pygame.time.wait(500) # 等待500毫秒
         return
 
     def get_human_input(self, obs):
@@ -484,28 +464,17 @@ class SealBattleRenderer:
                     self.drag_current_pos = event.pos
                 
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging:
-                    # 鼠标释放，计算行动参数
                     mouse_pos = event.pos
                     seal_pos = self.selected_seal['pos']
                     seal_screen_pos = (seal_pos[0], seal_pos[1] + self.status_bar_height)
                     
-                    # 计算向量（从海豹到鼠标）
                     dx = mouse_pos[0] - seal_screen_pos[0]
                     dy = mouse_pos[1] - seal_screen_pos[1]
-                    
-                    # 计算距离（速度）
                     distance = math.sqrt(dx*dx + dy*dy)
                     max_indicator_radius = 100
                     normalized_speed = min(1.0, distance / max_indicator_radius)
+                    angle = (math.atan2(dy, dx) + math.pi) % (2 * math.pi)
                     
-                    # 计算角度（弧度）
-                    angle = math.atan2(dy, dx)
-                    # 转换为反方向（海豹被推出去的方向）
-                    angle += math.pi
-                    # 规范化到0-2π范围
-                    angle %= 2 * math.pi
-                    
-                    # 保存行动参数
                     action = {
                         'team': current_team,
                         'idx': self.selected_seal['idx'],
@@ -517,7 +486,6 @@ class SealBattleRenderer:
                     self.selected_seal = None
                     self.drag_start_pos = None
                     self.drag_current_pos = None
-                    
                     # 渲染一帧以清除指示器
                     self.render_snapshot(obs, obs)
                     pygame.display.flip()
@@ -527,7 +495,6 @@ class SealBattleRenderer:
             # 渲染当前状态（包括拖拽指示器）
             self.render_snapshot(obs, obs)
             self.clock.tick(60)
-            
         return None
 
     def close(self):
@@ -541,22 +508,18 @@ def masked_softmax_sample(array, mask):
     masked_array = np.where(mask, array, -np.inf)
     exp_values = np.exp(masked_array - np.max(masked_array))  # 数值稳定性处理, no temperature
     probabilities = exp_values / np.sum(exp_values)
-    
     flat_probs = probabilities.flatten()
     flat_index = np.random.choice(len(flat_probs), p=flat_probs)
-    
     selected_index = np.unravel_index(flat_index, array.shape)
     return int(selected_index[0])
 
 if __name__ == '__main__':
     env = SealBattleEnv(render_mode='human')
     obs, _ = env.reset()
-    terminated = False
-    truncated = False
+    terminated, truncated = False, False
     turn = 'blue'
 
     while not (terminated or truncated):
-        # generate random actions for 3 seals
         action = {
             'team': turn,
             'idx': 0,
@@ -565,11 +528,8 @@ if __name__ == '__main__':
         aa = np.random.uniform(0, 1, (3,)) 
         action['idx'] = masked_softmax_sample(aa, obs['action_mask'][turn])
         # print(action)
-
         obs, rwd, terminated, truncated, info = env.step(action)
-        # frames = env.get_last_frames()
-        # turn = 'red' if turn == 'blue' else 'blue'
-        turn = env.current_move_team # ---------------------------------
+        turn = env.current_move_team
 
     print('Game over', info)
     env.close()

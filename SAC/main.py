@@ -1,6 +1,5 @@
 from env import SealBattleEnv, masked_softmax_sample
 import numpy as np
-import pygame
 
 
 if __name__ == '__main__':
@@ -27,8 +26,6 @@ if __name__ == '__main__':
                 'idx': action_idx,
                 'param': (np.random.uniform(0, 1), np.random.uniform(0, 2*np.pi))  
             }
-            print(f'AI {action}')
-
         obs, rwd, terminated, truncated, info = env.step(action)
         turn = env.current_move_team
 
