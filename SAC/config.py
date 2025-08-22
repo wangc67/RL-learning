@@ -18,7 +18,23 @@ class EnvConfig:
     # 还有一堆渲染设置就不写了
 
 class TrainConfig:
+    STATE_DIM:int = 24
+    ACTION_DIM:int = 3
+    GMM_COMPONENTS:int = 3
+
+    CKPT_DIR = "checkpoints"
+    PRETRAINED_CKPT = None  # "checkpoints/step_1000.pt"
+
     INITIAL_LR = 1e-4
+    ALPHA_LR = 1e-4
+    TOTAL_STEPS = 1e6
+    GAMMA = 0.99
+    TAU = 0.005
+
+    BUFFER_SIZE:int = 1000
+    BATCH_SIZE:int = 64
+    MAX_STEPS:int = 100000
+    SAVE_INTERVAL:int = 1000
 
 '''
 这玩意怎么写
