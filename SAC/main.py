@@ -1,7 +1,6 @@
 from env import SealBattleEnv, masked_softmax_sample
 import numpy as np
 from agent import SACGMM
-from train import process_obs
 import os
 from config import TrainConfig, EnvConfig
 
@@ -38,12 +37,8 @@ if __name__ == '__main__':
                     'param': (np.random.uniform(0, 1), np.random.uniform(0, 2*np.pi))  
                 }
             else: # 使用加载的模型进行推理
-                action_arr = agent.select_action(process_obs(obs))
-                action = {
-                    "team": obs['current_move_team'],
-                    "idx": int(action_arr[2]),
-                    "param": (action_arr[0], action_arr[1] * 2 * np.pi),  # 极坐标 (r, theta)
-                }
+                action_arr = agent.select_action(obs)
+                action = action_arr
             print(f"AI {turn} 选择的动作: {action}")
         obs, rwd, terminated, truncated, info = env.step(action)
         turn = env.current_move_team

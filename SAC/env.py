@@ -94,8 +94,8 @@ class SealBattleEnv:
 
         if self.render_mode == 'human':
             if not hasattr(self, 'renderer'):
-                self.renderer = SealBattleRenderer(self.arena_size)
-            self.renderer.play_frames([self._snapshot()], obs=observation, fps=self.metadata['render_fps'])
+                self.renderer = SealBattleRenderer(self.arena_size, fps=self.metadata['render_fps'])
+            self.renderer.play_frames([self._snapshot()], obs=observation)
         return observation, None
 
     def close(self): # api for gym
@@ -272,11 +272,23 @@ class SealBattleEnv:
                 else:
                     self.kills_by_red += 1
 
-    def step(self, action: Dict): # api for gym
+    def step(self, step_action): # api for gym
         """
         Each action ai is either (r,theta) where r in [0,1] scaled to max_shot_speed, theta in radians, or None.
         action = {'team': 'blue' or 'red', 'idx': seal_idx, 'param': (r, theta)}
+        or action = np.array([r,theta, idx]), r,theta \in [0, 1], idx \in \{0, 1, 2\},
+        where theta *= 2\pi will be done in the function
         """
+        if isinstance(step_action, Dict):
+            action = step_action
+        elif isinstance(step_action, list) or isinstance(step_action, np.ndarray):
+            assert len(step_action) == 3, f'wrong dim of array-typed action'
+            action = {
+                "team": self.current_move_team,
+                "idx": int(step_action[2]),
+                "param": (step_action[0], step_action[1] * 2 * np.pi),  # 极坐标 (r, theta)
+            }
+
         assert action['team'] == self.current_move_team, f"Expected team {self.current_move_team} to act, got {action['team']}"
         acting_list = self.blue if action['team']=='blue' else self.red
         assert acting_list[action['idx']].movable, f"Seal {action['idx']} of team {action['team']} is not allowed to act this round"
@@ -316,7 +328,7 @@ class SealBattleEnv:
         terminated = (self.kills_by_blue >= self.max_enemy_respawns_to_win) or (self.kills_by_red >= self.max_enemy_respawns_to_win)
         truncated = False  # 没有时间限制导致的结束
         if self.render_mode == 'human':
-            self.renderer.play_frames(self._last_frames, obs=observation, fps=self.metadata['render_fps'])
+            self.renderer.play_frames(self._last_frames, obs=observation)
 
         return observation, reward, terminated, truncated, info
 
@@ -327,11 +339,12 @@ class SealBattleEnv:
         return 0.0
 
 class SealBattleRenderer:
-    def __init__(self, arena_size=(900,500), scale:float=1.0, caption: str = 'SealBattle'):
+    def __init__(self, arena_size=(900,500), scale:float=1.0, caption: str = 'SealBattle', fps:int=60):
         # pygame import is local to keep core env free of pygame dependency
         import pygame
         pygame.init()
         self.pygame = pygame
+        self.fps = fps
         self.arena_size = arena_size
         self.status_bar_height = 30
         window_size = (arena_size[0], arena_size[1] + self.status_bar_height)
@@ -347,7 +360,7 @@ class SealBattleRenderer:
         self.drag_start_pos = None
         self.drag_current_pos = None
 
-    def render_snapshot(self, snapshot, obs):
+    def render_snapshot(self, snapshot, obs: Dict[str, Any]):
         # single snapshot draw
         pygame = self.pygame
         self.screen.fill((50, 50, 50), (0, 0, self.arena_size[0], self.status_bar_height))
@@ -406,7 +419,7 @@ class SealBattleRenderer:
 
         pygame.display.flip()
 
-    def play_frames(self, frames: List[Dict[str,Any]], obs, fps: int = 60):
+    def play_frames(self, frames: List[Dict[str,Any]], obs:Dict[str, Any]):
         pygame = self.pygame
         running = True
         for snapshot in frames:
@@ -417,11 +430,11 @@ class SealBattleRenderer:
             if not running:
                 break
             self.render_snapshot(snapshot, obs)
-            self.clock.tick(fps)
+            self.clock.tick(self.fps)
         pygame.time.wait(500) # 等待500毫秒
         return
 
-    def get_human_input(self, obs):
+    def get_human_input(self, obs:Dict[str,Any]) -> Optional[Dict]:
         """获取人类玩家的输入"""
         pygame = self.pygame
         self.dragging = False

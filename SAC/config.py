@@ -19,7 +19,7 @@ class EnvConfig:
 
 class TrainConfig:
     STATE_DIM:int = 24
-    ACTION_DIM:int = 3
+    ACTION_DIM:int = 3 # (r, theta, idx)
     GMM_COMPONENTS:int = 3
 
     CKPT_DIR = "checkpoints"

@@ -2,14 +2,13 @@ import math
 import random
 import time
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Dict, Any
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 from collections import deque
-from env import SealBattleEnv
 from config import TrainConfig, EnvConfig
 
 # ============ Replay Buffer ============ #
@@ -155,7 +154,6 @@ class GMMActor(nn.Module):
 
         return action_out, log_prob
 
-
 # ============ Q 网络 ============ #
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dims=[128,128]):
@@ -166,8 +164,21 @@ class QNetwork(nn.Module):
 
 # ============ SAC-GMM Agent ============ #
 class SACGMM:
-    def __init__(self, cfg=TrainConfig()):
+    def __init__(self, cfg=TrainConfig(), mode='train'):
+        self.mode = mode # train or test, if test, no need to load q nets
+        self.cfg = cfg
         self.actor = GMMActor(cfg.STATE_DIM, cfg.ACTION_DIM)
+        
+        self.gamma = cfg.GAMMA
+        self.tau = cfg.TAU
+        self.target_entropy = -cfg.ACTION_DIM
+        self.batch_size = cfg.BATCH_SIZE
+
+        if self.mode == 'train':
+            self.reset_train(self.cfg)
+
+    def reset_train(self, cfg:TrainConfig):
+        self.replay_buffer = ReplayBuffer(max_size=cfg.BUFFER_SIZE)
         self.q1 = QNetwork(cfg.STATE_DIM, cfg.ACTION_DIM)
         self.q2 = QNetwork(cfg.STATE_DIM, cfg.ACTION_DIM)
         self.target_q1 = QNetwork(cfg.STATE_DIM, cfg.ACTION_DIM)
@@ -182,19 +193,18 @@ class SACGMM:
         self.log_alpha = torch.tensor(0.0, requires_grad=True)
         self.alpha_opt = torch.optim.Adam([self.log_alpha], lr=cfg.ALPHA_LR)
 
-        self.gamma = cfg.GAMMA
-        self.tau = cfg.TAU
-        self.target_entropy = -cfg.ACTION_DIM
-
-        self.batch_size = cfg.BATCH_SIZE
-
-    def select_action(self, state, eval_mode=False):
+    def select_action(self, obs, eval_mode=False):
+        # 这里可以eval用mle，train用采样，tbd
+        state = self.process_obs(obs)
         state = torch.FloatTensor(state).unsqueeze(0)
         action, _ = self.actor.sample(state)
         return action.detach().cpu().numpy()[0]
 
-    def update(self, replay_buffer:ReplayBuffer):
-        state, action, reward, next_state, done = replay_buffer.sample(self.batch_size)
+    def update(self):
+        if len(self.replay_buffer) < self.cfg.BATCH_SIZE: # 其实不太懂这个条件写啥
+            return 
+        
+        state, action, reward, next_state, done = self.replay_buffer.sample(self.batch_size)
 
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(next_state)
@@ -230,6 +240,37 @@ class SACGMM:
     def alpha(self):
         return self.log_alpha.exp()
 
+    def process_obs(self, obs: Dict[str, Any]) -> np.ndarray:
+        # state: 42
+        # (x,y,hp) * 3, kill, (x,y,hp) * 3, kill, xian_shou, action_mask
+        def process_state(s):
+            tmp = []
+            for item in s:
+                x, y = item['pos']
+                hp = item['hp']
+                tmp.extend([x, y, hp])
+            return np.array(tmp, dtype=float)
+
+        current_move_team = obs['current_move_team']
+        round_first = [1] if obs['round_first'] == current_move_team else [0]
+        blue = process_state(obs['blue'])
+        red = process_state(obs['red'])
+        kills_by_blue = obs['kills_by_blue']
+        kills_by_red = obs['kills_by_red']
+        action_mask = obs['action_mask']['blue'] if current_move_team == 'blue' else obs['action_mask']['red']
+
+        first_team = blue if current_move_team == 'blue' else red
+        second_team = red if current_move_team == 'blue' else blue
+        first_kill = [kills_by_blue if current_move_team == 'blue' else kills_by_red]
+        second_kill = [kills_by_red if current_move_team == 'blue' else kills_by_blue]
+        state = [*first_team, *first_kill, *second_team, *second_kill, *round_first, *action_mask]
+        return np.array(state)
+
+    def update_buffer(self, obs, action, reward, next_obs, done):
+        state = self.process_obs(obs)
+        next_state = self.process_obs(next_obs)
+        self.replay_buffer.push(state, action, reward, next_state, done)
+
     def save(self, path):
         torch.save({
             "actor": self.actor.state_dict(),
@@ -243,11 +284,30 @@ class SACGMM:
     def load(self, path, device='cpu'):
         checkpoint = torch.load(path, map_location=device)
         self.actor.load_state_dict(checkpoint["actor"])
-        self.q1.load_state_dict(checkpoint["q1"])
-        self.q2.load_state_dict(checkpoint["q2"])
-        self.target_q1.load_state_dict(checkpoint["target_q1"])
-        self.target_q2.load_state_dict(checkpoint["target_q2"])
-        self.log_alpha = torch.tensor(checkpoint["log_alpha"], requires_grad=True)
+        if self.mode == 'train':
+            self.q1.load_state_dict(checkpoint["q1"])
+            self.q2.load_state_dict(checkpoint["q2"])
+            self.target_q1.load_state_dict(checkpoint["target_q1"])
+            self.target_q2.load_state_dict(checkpoint["target_q2"])
+            self.log_alpha = torch.tensor(checkpoint["log_alpha"], requires_grad=True)
 
 if __name__ == '__main__':
     print('agent.py')
+    # 为啥都是0？
+    cfg = TrainConfig()
+    agent = SACGMM(cfg=cfg, mode='train')
+    agent.load('checkpoints/step_1000.pt', device='cuda:0')
+    time.sleep(2)
+    mm = torch.cuda.memory_allocated()
+    print(f'GPU memory allocated: {mm:.2f} MB')
+    del agent
+    time.sleep(2)
+    mm = torch.cuda.memory_allocated()
+    print(f'GPU memory allocated after del: {mm:.2f} MB')
+    agent = SACGMM(cfg=cfg, mode='test')
+    agent.load('checkpoints/step_1000.pt', device='cuda:0')
+    time.sleep(2)
+    mm = torch.cuda.memory_allocated()
+    print(f'GPU memory allocated after test agent created: {mm:.2f} MB')
+
+    exit()
