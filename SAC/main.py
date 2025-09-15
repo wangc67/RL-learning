@@ -42,7 +42,7 @@ if __name__ == '__main__':
             print(f"AI {turn} 选择的动作: {action}")
         obs, rwd, terminated, truncated, info = env.step(action)
         turn = env.current_move_team
-        print(obs)
+        # print([it['current_move_team'] for it in env.trajectory])
 
     print('Game over', info)
     env.close()

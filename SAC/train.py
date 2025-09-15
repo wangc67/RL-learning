@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 from env import SealBattleEnv
 from config import EnvConfig, TrainConfig
 from agent import SACGMM, ReplayBuffer
+import jsonlines
+from time import time
 
 def reward():
     return 0.0
@@ -18,6 +20,7 @@ def reward():
 # ============ 训练循环 ============ #
 def train_selfplay(env, agent, cfg:TrainConfig):
     os.makedirs(cfg.CKPT_DIR, exist_ok=True)
+    log_file = os.path.join(cfg.CKPT_DIR, f'reward_log{str(time()).split(".")[0]}.jsonl')
 
     reward_log = []
     episode_reward = 0
@@ -38,6 +41,8 @@ def train_selfplay(env, agent, cfg:TrainConfig):
 
         if terminated or truncated:
             reward_log.append(episode_reward)
+            with jsonlines.open(log_file, mode='a') as writer:
+                writer.write({"step": step, "reward": episode_reward})
             episode_reward = 0
             obs, _ = env.reset()
 

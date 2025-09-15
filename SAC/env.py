@@ -100,7 +100,9 @@ class SealBattleEnv:
                 self.renderer = SealBattleRenderer(self.arena_size, fps=self.metadata['render_fps'])
             self.renderer.play_frames([self._snapshot()], obs=observation)
 
-        self.trajectory = [observation for _ in range(2)]
+        fake_observation = copy.deepcopy(observation)
+        fake_observation['current_move_team'] = 'red' if self.current_move_team=='blue' else 'blue'
+        self.trajectory = [fake_observation, observation, fake_observation, observation]  # 初始化为4个obs交替，方便reward计算
         return observation, None
 
     def close(self): # api for gym
@@ -327,7 +329,7 @@ class SealBattleEnv:
         observation = self._get_obs()
         self.trajectory.append(observation)
 
-        reward = self._get_reward(self.trajectory[-3:]) # tbd -------------------------------------------------
+        reward = self._get_reward(self.trajectory[-5:]) 
         info = {
             'kills_by_blue': self.kills_by_blue,
             'kills_by_red': self.kills_by_red,
@@ -343,8 +345,7 @@ class SealBattleEnv:
         return self._last_frames
 
     def _get_reward(self, obs_lst):
-        # obs_lst: last 3 observations, including current one
-        # 分别是 我方，对方，我方 三次obs
+        # obs_lst: last 5 observations, including current one
         return get_reward(obs_lst)
 
 class SealBattleRenderer:

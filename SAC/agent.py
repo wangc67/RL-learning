@@ -115,11 +115,20 @@ class GMMActor(nn.Module):
         std  = (gmm_onehot.unsqueeze(-1) * stds_selected).sum(dim=1) + 1e-5  # [B,2]
         # print(f'mean: {mean}, std: {std}')
         eps = torch.randn_like(std)
-        action = torch.sigmoid(mean + std * eps) # [B, 2]
+        action = mean + std * eps # [B, 2]
+        # print(action)
+        # print(action[:, 0:1])
+        action = torch.cat([torch.sigmoid(action[:, 0:1]), torch.frac(action[:, 1:])], dim=-1)
+        # print(action.shape)
+        # print(action)
+        # exit()
 
         action_seal_idx = seal_onehot.argmax(dim=-1, keepdim=True).float() # [B, 1]
         action_total = torch.cat([action, action_seal_idx], dim=-1) # [B, 3]
 
+
+        if torch.isnan(mean).any() or torch.isnan(std).any():
+            print("Actor输出NaN! 输入state:", mean, std, state)
 	    # 连续动作 log_prob
         normal_dist = torch.distributions.Normal(mean, std)
         log_prob_cont = normal_dist.log_prob(action).sum(dim=-1, keepdim=True)  # [B,1]

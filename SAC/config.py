@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional, Dict, Any
 
 class EnvConfig:
     MAX_HP = 40
-    ATK = 6
+    ATK = 15
     RADIUS = 30.0
     MAX_VELOCITY = 800.0
     MU = 0.1 #  currently using friction, mu not used
@@ -14,7 +14,7 @@ class EnvConfig:
     ARENA_SIZE = (900, 500)
     FPS = 60
 
-    WIN_SCORE = 4
+    WIN_SCORE = 3
     # 还有一堆渲染设置就不写了
 
 class TrainConfig:
@@ -25,7 +25,7 @@ class TrainConfig:
     CKPT_DIR = "checkpoints"
     PRETRAINED_CKPT = None  # "checkpoints/step_1000.pt"
 
-    INITIAL_LR = 5e-4
+    INITIAL_LR = 1e-4
     ALPHA_LR = 1e-4
     TOTAL_STEPS = 1e6
     GAMMA = 0.99
@@ -33,8 +33,8 @@ class TrainConfig:
 
     BUFFER_SIZE:int = 2000
     BATCH_SIZE:int = 64
-    MAX_STEPS:int = 100000
-    SAVE_INTERVAL:int = 1000
+    MAX_STEPS:int = 50000
+    SAVE_INTERVAL:int = 5000
 
 '''
 这玩意怎么写
