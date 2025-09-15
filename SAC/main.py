@@ -13,10 +13,10 @@ if __name__ == '__main__':
     turn = 'blue'
 
     human_controls_blue = True # 设置为True让人类控制蓝色队伍
-    human_controls_red = False  # 设置为True让人类控制红色队伍
+    human_controls_red = True  # 设置为True让人类控制红色队伍
 
     ckpt_file = "checkpoints/step_1000.pt"
-    if ckpt_file and os.path.exists(ckpt_file):
+    if ckpt_file and os.path.exists(ckpt_file) and (not human_controls_blue or not human_controls_red):
         agent = SACGMM()
         agent.load(ckpt_file)
         print(f"已加载模型 {ckpt_file}")
@@ -42,6 +42,7 @@ if __name__ == '__main__':
             print(f"AI {turn} 选择的动作: {action}")
         obs, rwd, terminated, truncated, info = env.step(action)
         turn = env.current_move_team
+        print(obs)
 
     print('Game over', info)
     env.close()

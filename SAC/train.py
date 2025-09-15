@@ -12,10 +12,12 @@ from env import SealBattleEnv
 from config import EnvConfig, TrainConfig
 from agent import SACGMM, ReplayBuffer
 
+def reward():
+    return 0.0
+
 # ============ 训练循环 ============ #
 def train_selfplay(env, agent, cfg:TrainConfig):
     os.makedirs(cfg.CKPT_DIR, exist_ok=True)
-    replay_buffer = ReplayBuffer(max_size=cfg.BUFFER_SIZE)
 
     reward_log = []
     episode_reward = 0
@@ -23,8 +25,6 @@ def train_selfplay(env, agent, cfg:TrainConfig):
 
     for step in range(1, cfg.MAX_STEPS + 1):
         action = agent.select_action(obs)
-        # print(step, action)
-        # exit()
         # step_action = {
         #     "team": obs['current_move_team'],
         #     "idx": int(action[2]),
@@ -56,7 +56,6 @@ def train_selfplay(env, agent, cfg:TrainConfig):
     plt.xlabel("Episode")
     plt.ylabel("Reward")
     plt.legend()
-    plt.grid(True)
     plt.savefig(os.path.join(cfg.CKPT_DIR, "training_curve.png"))
     plt.show()
 

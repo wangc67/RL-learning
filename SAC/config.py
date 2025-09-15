@@ -25,13 +25,13 @@ class TrainConfig:
     CKPT_DIR = "checkpoints"
     PRETRAINED_CKPT = None  # "checkpoints/step_1000.pt"
 
-    INITIAL_LR = 1e-4
+    INITIAL_LR = 5e-4
     ALPHA_LR = 1e-4
     TOTAL_STEPS = 1e6
     GAMMA = 0.99
     TAU = 0.005
 
-    BUFFER_SIZE:int = 1000
+    BUFFER_SIZE:int = 2000
     BATCH_SIZE:int = 64
     MAX_STEPS:int = 100000
     SAVE_INTERVAL:int = 1000
@@ -43,31 +43,4 @@ class TrainConfig:
 #     'idx': seal_idx,
 #     'param': (r, theta)
 # }
-
-# obs = {
-#     'blue': [s.state() for s in self.blue],
-#     'red': [s.state() for s in self.red],
-#     'round_first': self.round_first,
-#     'current_round': self.current_round,
-#     'current_move_team': self.current_move_team,
-#     'kills_by_blue': self.kills_by_blue,
-#     'kills_by_red': self.kills_by_red,
-#     'action_mask': {
-#         'blue': [s.movable for s in self.blue],
-#         'red': [s.movable for s in self.red],
-#     }
-# }
-
-#    def state(self):
-#         return {
-#             'team': self.team,
-#             'idx': self.idx,
-#             'pos': tuple(self.pos),
-#             'vel': tuple(self.vel),
-#             'hp': self.hp,
-#             'attack': self.attack,
-#             'alive': self.alive,
-#             'radius': self.radius,
-#             'movable': self.movable,
-#         }
 '''

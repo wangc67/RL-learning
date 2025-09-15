@@ -4,6 +4,7 @@ import copy
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from config import EnvConfig
+from reward import get_reward
 
 """
 创死时候，尸体会继续完成碰撞，都停下来再重生
@@ -74,6 +75,8 @@ class SealBattleEnv:
         # storage for last-generated frames (for renderer convenience)
         self._last_frames = []
 
+        self.trajectory = [] # store obs
+
     def _build_seals(self):
         self.blue = [Seal('blue', i, self._blue_init_positions[i], attack=self.cfg.ATK, max_hp=self.cfg.MAX_HP) for i in range(self.seals_per_team)]
         self.red  = [Seal('red', i, self._red_init_positions[i], attack=self.cfg.ATK, max_hp=self.cfg.MAX_HP) for i in range(self.seals_per_team)]
@@ -96,6 +99,8 @@ class SealBattleEnv:
             if not hasattr(self, 'renderer'):
                 self.renderer = SealBattleRenderer(self.arena_size, fps=self.metadata['render_fps'])
             self.renderer.play_frames([self._snapshot()], obs=observation)
+
+        self.trajectory = [observation for _ in range(2)]
         return observation, None
 
     def close(self): # api for gym
@@ -282,7 +287,7 @@ class SealBattleEnv:
         if isinstance(step_action, Dict):
             action = step_action
         elif isinstance(step_action, list) or isinstance(step_action, np.ndarray):
-            assert len(step_action) == 3, f'wrong dim of array-typed action'
+            assert len(step_action) == 3, f'wrong dim of array-typed action, expected 3 got {len(step_action)}'
             action = {
                 "team": self.current_move_team,
                 "idx": int(step_action[2]),
@@ -320,7 +325,9 @@ class SealBattleEnv:
         self._last_frames = frames_all
 
         observation = self._get_obs()
-        reward = self._get_reward() # tbd -------------------------------------------------
+        self.trajectory.append(observation)
+
+        reward = self._get_reward(self.trajectory[-3:]) # tbd -------------------------------------------------
         info = {
             'kills_by_blue': self.kills_by_blue,
             'kills_by_red': self.kills_by_red,
@@ -335,8 +342,10 @@ class SealBattleEnv:
     def get_last_frames(self) -> List[Dict[str,Any]]:
         return self._last_frames
 
-    def _get_reward(self):
-        return 0.0
+    def _get_reward(self, obs_lst):
+        # obs_lst: last 3 observations, including current one
+        # 分别是 我方，对方，我方 三次obs
+        return get_reward(obs_lst)
 
 class SealBattleRenderer:
     def __init__(self, arena_size=(900,500), scale:float=1.0, caption: str = 'SealBattle', fps:int=60):

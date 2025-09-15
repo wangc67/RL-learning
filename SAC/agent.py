@@ -13,7 +13,7 @@ from config import TrainConfig, EnvConfig
 
 # ============ Replay Buffer ============ #
 class ReplayBuffer:
-    def __init__(self, max_size=1000):
+    def __init__(self, max_size=2000):
         self.buffer = deque(maxlen=max_size)
     def push(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
@@ -45,19 +45,23 @@ def mlp(input_dim, hidden_dims, output_dim, activation=nn.ReLU, out_act=None):
 
 # ============ Actor with GMM ============ #
 class GMMActor(nn.Module):
-    def __init__(self, obs_dim, action_dim, num_components=3, hidden_dims=[128,128]):
+    def __init__(self, obs_dim, action_dim, num_components=3, hidden_dims=[128,256]):
         super().__init__()
         self.num_components = num_components
         self.action_dim = action_dim
+        self.hidden_dims = hidden_dims
+        self.backbone_dim = 128
         
         state_dim = obs_dim - 3 #-----
         # shared backbone
-        self.backbone = mlp(state_dim, [hidden_dims[0]], hidden_dims[1])
+        self.backbone = mlp(input_dim=state_dim, hidden_dims=hidden_dims,
+                            output_dim=self.backbone_dim, out_act=nn.ReLU)
 
-        # actor heads
-        self.logits_head = nn.Linear(hidden_dims[1], 3) # 选择 seal idx
-        self.gmm_head = nn.Linear(hidden_dims[1], 3 * 3 * 3 * 2) # mixture of 3 Gaussians, 每个有 (mean, logstd) for r,theta
-        # self.gmm_logit = nn.Linear(hidden_dims[1], 9)
+        self.relu = nn.ReLU()
+        self.seal_logit = nn.Linear(self.backbone_dim, 3)
+        self.gmm_logit = nn.Linear(self.backbone_dim, 3 * self.num_components * 2) # seal 3
+        self.mu_head = nn.Linear(self.backbone_dim, 3 * self.num_components * 2) # action: r, theta, idx
+        self.std_head = nn.Linear(self.backbone_dim, 3 * self.num_components * 2)
 
     def masked_softmax(self, logits, mask, temperature=1.0):
         masked_logits = logits.masked_fill(~mask, -1e9)
@@ -67,28 +71,14 @@ class GMMActor(nn.Module):
     def forward(self, state: torch.Tensor):
         state = state[:,:-3]
         feature = self.backbone(state)
-        out = self.gmm_head(feature)
-        logit = self.logits_head(feature)
-        # gmm_logits = self.gmm_logit(feature)
+        
+        means = self.mu_head(feature).view(-1, 3, self.num_components, 2)
+        stds = self.std_head(feature).view(-1, 3, self.num_components, 2)
+        gmm_logits = self.gmm_logit(feature).view(-1, 3, self.num_components, 2)
+        seal_logits = self.seal_logit(feature)
 
-        # logit: batch * 3(num_seals)
-
-        """
-        num of distrubutions: 3(numseals) * 3(gmm_num) * 2(action_dim)
-        param for each distribution: 3, mu, std, logit
-
-        mean: [batch * 3(num_seals) * 3(gmm_num)]
-        log_std: [batch * 3(num_seals) * 3(gmm_num)]
-        gmm_logits: [batch * 3(num_seals) * 3(gmm_num)]
-        """
-
-        means, log_stds, gmm_logits = torch.chunk(out, 3, dim=-1)
-        means = means.view(-1, 3, 3, 2)
-        means = torch.sigmoid(means) # 保证在 [0, 1] 之间
-        log_stds = log_stds.view(-1, 3, 3, 2).clamp(-5,2)
-        gmm_logits = gmm_logits.view(-1, 3, 3, 2)
-        # print('means', means.shape, 'log_stds', log_stds.shape, 'gmm_logits', gmm_logits.shape)  # 调试输出
-        return logit, means, log_stds, gmm_logits
+        stds = self.relu(stds)
+        return seal_logits, means, stds, gmm_logits
 
     def gumbel_softmax(self, logits, tau=1.0, hard=False):
         eps = 1e-20
@@ -107,52 +97,44 @@ class GMMActor(nn.Module):
         return y
 
     def sample(self, state, tau=1.0):
-        action_mask = (state[:, -3:] == 1)  # [B, 3]
-        logit, means, log_stds, gmm_logits = self(state)
-        # logit: [B,3], means/log_stds/gmm_logits: [B,3,3,2]
-
-        # ---------- Step1: 动作选择 (soft Gumbel-Softmax) ----------
-        probs_action = self.masked_softmax(logit, action_mask)  # [B,3]
-        action_onehot = self.gumbel_softmax(torch.log(probs_action + 1e-20), tau=tau, hard=False)  # [B,3]
-
-        # ---------- Step2: GMM component选择 ----------
-        gmm_probs = (action_onehot.unsqueeze(-1).unsqueeze(-1) * gmm_logits).sum(dim=1)  # [B,3,2]
+        seal_mask = (state[:, -3:] == 1)  # [B, 3]
+        # new
+        seal_logits, means, stds, gmm_logits = self(state)
+        
+        seal_probs = self.masked_softmax(seal_logits, seal_mask)
+        seal_onehot = self.gumbel_softmax(torch.log(seal_probs+1e-20),tau=tau,hard=True)
+        
+        gmm_probs = (seal_onehot.unsqueeze(-1).unsqueeze(-1) * gmm_logits).sum(dim=1)  # [B,3,2]
         gmm_probs = F.softmax(gmm_probs, dim=1)  # [B,3,2]
-        comp_onehot = self.gumbel_softmax(torch.log(gmm_probs.sum(-1) + 1e-20), tau=tau, hard=False)  # [B,3]
-
-        # ---------- Step3: mean/std计算 ----------
-        means_selected = (action_onehot.unsqueeze(-1).unsqueeze(-1) * means).sum(dim=1)   # [B,3,2]
-        stds_selected  = (action_onehot.unsqueeze(-1).unsqueeze(-1) * log_stds).sum(dim=1)  # [B,3,2]
-
-        mean = (comp_onehot.unsqueeze(-1) * means_selected).sum(dim=1)  # [B,2]
-        std  = torch.exp((comp_onehot.unsqueeze(-1) * stds_selected).sum(dim=1))  # [B,2]
-
-        # ---------- Step4: 高斯 reparameterization ----------
+        gmm_onehot = self.gumbel_softmax(torch.log(gmm_probs.sum(-1) + 1e-20), tau=tau, hard=True)  # [B,3]
+        # print(f'seal_onehot: {seal_onehot}, gmm_onehot: {gmm_onehot}')
+        means_selected = (seal_onehot.unsqueeze(-1).unsqueeze(-1) * means).sum(dim=1)   # [B,3,2]
+        stds_selected  = (seal_onehot.unsqueeze(-1).unsqueeze(-1) * stds).sum(dim=1)  # [B,3,2]
+        # print(f'mean_selected: {means_selected}, stds_selected: {stds_selected}')
+        mean = (gmm_onehot.unsqueeze(-1) * means_selected).sum(dim=1)  # [B,2]
+        std  = (gmm_onehot.unsqueeze(-1) * stds_selected).sum(dim=1) + 1e-5  # [B,2]
+        # print(f'mean: {mean}, std: {std}')
         eps = torch.randn_like(std)
-        action = mean + std * eps
-        action = torch.clamp(action, 0, 1)  # [B,2]
+        action = torch.sigmoid(mean + std * eps) # [B, 2]
 
-        # ---------- Step5: 拼接动作索引 ----------
-        action_idx = action_onehot.argmax(dim=-1, keepdim=True).float()  # [B,1]
-        action_out = torch.cat([action, action_idx], dim=-1)  # [B,3]
+        action_seal_idx = seal_onehot.argmax(dim=-1, keepdim=True).float() # [B, 1]
+        action_total = torch.cat([action, action_seal_idx], dim=-1) # [B, 3]
 
-        # ---------- Step6: 可导 log_prob ----------
-
-        # 连续动作 log_prob
+	    # 连续动作 log_prob
         normal_dist = torch.distributions.Normal(mean, std)
-        log_prob_cont = normal_dist.log_prob(action[:, :2]).sum(dim=-1, keepdim=True)  # [B,1]
+        log_prob_cont = normal_dist.log_prob(action).sum(dim=-1, keepdim=True)  # [B,1]
 
         # 离散动作 log_prob (soft)
-        log_prob_disc = torch.sum(action_onehot * torch.log(probs_action + 1e-20), dim=-1, keepdim=True)  # [B,1]
+        log_prob_disc = torch.sum(seal_onehot * torch.log(seal_probs + 1e-20), dim=-1, keepdim=True)  # [B,1]
 
         # GMM component log_prob (soft)
         comp_probs = gmm_probs.sum(-1)  # [B,3]
-        log_prob_comp = torch.sum(comp_onehot * torch.log(comp_probs + 1e-20), dim=-1, keepdim=True)  # [B,1]
+        log_prob_comp = torch.sum(gmm_onehot * torch.log(comp_probs + 1e-20), dim=-1, keepdim=True)  # [B,1]
 
         # 总 log_prob
         log_prob = log_prob_cont + log_prob_disc + log_prob_comp  # [B,1]
-
-        return action_out, log_prob
+        # print(f'action: {action_total}, log_prob: {log_prob}')
+        return action_total, log_prob
 
 # ============ Q 网络 ============ #
 class QNetwork(nn.Module):
