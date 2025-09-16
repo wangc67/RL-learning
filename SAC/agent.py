@@ -11,6 +11,28 @@ from torch.distributions import Normal
 from collections import deque
 from config import TrainConfig, EnvConfig
 
+
+class common_ai():
+    def __init__(self):
+        pass
+    
+    def select_action(self, obs):
+        selected_seal_idx = 0
+        my_team = obs['current_move_team']
+        enemy_team = 'blue' if my_team == 'red' else 'red'
+        for i in range(3):
+            if obs['action_mask'][my_team][i] == True:
+                selected_seal_idx = i
+            break
+        rr = 1
+        x0, y0 = obs[my_team][selected_seal_idx]['pos']
+
+        crush_seal_idx = random.randint(0, 3)
+        x1, y1 = obs[enemy_team][crush_seal_idx]['pos']
+        theta = np.atan((y1 - y0) / (x1 - x0 + 1e-7))
+        return np.array([rr, theta, selected_seal_idx])
+
+
 # ============ Replay Buffer ============ #
 class ReplayBuffer:
     def __init__(self, max_size=2000):
