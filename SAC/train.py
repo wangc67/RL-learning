@@ -14,9 +14,6 @@ from agent import SACGMM, ReplayBuffer
 import jsonlines
 from time import time
 
-def reward():
-    return 0.0
-
 # ============ 训练循环 ============ #
 def train_selfplay(env, agent, cfg:TrainConfig):
     os.makedirs(cfg.CKPT_DIR, exist_ok=True)
